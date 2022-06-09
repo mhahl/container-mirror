@@ -18,17 +18,35 @@ package cmd
 
 import (
 	"os"
-
 	"github.com/spf13/cobra"
+	log "github.com/sirupsen/logrus"
+	"github.com/mhahl/container-mirror/service"
 )
 
+
+var (
+	/* Verbose defines if the command is being run with verbose mode */
+	Verbose bool
+
+	/* IgnoreErrors ignores errors when mirroring */
+	IgnoreErrors bool
+
+	/* Path to the config file */
+	configFile string
+
+	/* Log prefix */
+	prefix       = "contianer-mirror: "
+	logger       *log.Logger
+	logLevel     string
+)
 
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "container-mirror",
 	Short: "",
-	Long: `Mirror containers and helm charts from an index file into a local registry.`,
+	Long: `Mirror containers from index file into a local registry.`,
+	Run: runCmd,
 }
 
 func Execute() {
@@ -38,16 +56,17 @@ func Execute() {
 	}
 }
 
+/**
+ * Create the service and start the mirror process.
+ */
+func runCmd(cmd *cobra.Command, args []string) {
+		containerService := service.NewContainerService(configFile, true, true, logger)
+		containerService.Get()
+}
+
 func init() {
-	// Here you will define your flags and configuration settings.
-	// Cobra supports persistent flags, which, if defined here,
-	// will be global for your application.
-
-	// rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.container-mirror.yaml)")
-
-	// Cobra also supports local flags, which will only run
-	// when this action is called directly.
-	//rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	logger = log.New()
+	rootCmd.Flags().StringVar(&configFile, "config", "config.yaml", "Set configuration file")
 }
 
 
