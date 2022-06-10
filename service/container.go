@@ -6,8 +6,8 @@ import (
 	//"os"
 	"runtime"
 	//"strconv"
-	//"strings"
-	//"sync"
+	"strings"
+	"sync"
 	"time"
 	"context"
 	log "github.com/sirupsen/logrus"
@@ -19,10 +19,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var (
-	config ContainerConfig
-	dockerClient client.Client
-)
 
 /**
  * Config is the result of the parsed yaml for the mirror configuration.
@@ -57,8 +53,8 @@ type Repository struct {
 	DropTags        []string          `yaml:"ignore_tag"`
 	MaxTags         int               `yaml:"max_tags"`
 //	MaxTagAge       *Duration         `yaml:"max_tag_age"`
-	RemoteTagSource string            `yaml:"remote_tags_source"`
-	RemoteTagConfig map[string]string `yaml:"remote_tags_config"`
+//	RemoteTagSource string            `yaml:"remote_tags_source"`
+//	RemoteTagConfig map[string]string `yaml:"remote_tags_config"`
 	TargetPrefix    *string           `yaml:"target_prefix"`
 	Host            string            `yaml:"host"`
 }
@@ -72,26 +68,28 @@ type ContainerServiceInterface interface {
 
 // GetService structure definition
 type ContainerService struct {
-	config       ContainerConfig
+	config       *ContainerConfig
 	dockerClient *client.Client
+	prefix       string
 	verbose      bool
 	ignoreErrors bool
 	logger 		*log.Logger
 }
 
 
-func validateConfig(containerConfig *ContainerConfig) {
+func validateConfig(containerConfig *ContainerConfig) () {
 	if containerConfig.Target.Registry == "" {
 		log.Fatalf("Missing `target.registry` in configuration file")
 	}
 
 	if containerConfig.Workers == 0 {
+		log.Info("Setting workers to z")
 		containerConfig.Workers = runtime.NumCPU()
 	}
 
 }
 
-func NewContainerService(configFile string, verbose bool, ignoreErrors bool, logger *log.Logger) ContainerServiceInterface {
+func NewContainerService(configFile string, prefix string, verbose bool, ignoreErrors bool, logger *log.Logger) ContainerServiceInterface {
 
 	/**
 	* Read the configuration file.
@@ -128,32 +126,103 @@ func NewContainerService(configFile string, verbose bool, ignoreErrors bool, log
 		log.Fatalf("Could not get Docker info: %s", err.Error())
 	}
 
-
-	log.Info(fmt.Sprintf("%s",info))
+	log.Infof("Connected to Docker daemon: %s @ %s", info.Name, info.ServerVersion)
 
 	/**
 	 * Configure backoff settings 
 	 * for the container pull.
 	 */
 	backoffSettings := backoff.NewExponentialBackOff()
-
 	backoffSettings.InitialInterval = 1 * time.Second
 	backoffSettings.MaxElapsedTime = 10 * time.Second
 
 	/* Retun the new Object */
 	return &ContainerService{
-		config: containerConfig,
+		config: &containerConfig,
 		dockerClient: dockerClient,
+		prefix: prefix,
 		verbose: verbose,
 		ignoreErrors: ignoreErrors,
 		logger: logger,
 	}
 }
 
-func (g *ContainerService) Get() error {
+func (s *ContainerService) Get() error {
 
+	fmt.Println("in Get()")
 
-	fmt.Println(config)
+	workerCh := make(chan Repository, 5)
+	var wg sync.WaitGroup
+
+	/* Start background workers */
+	for i := 0; i < s.config.Workers; i++ {
+		go worker(&wg, workerCh, s.dockerClient )
+	}
+
+	// add jobs for the workers
+	for _, dockerRepo := range s.config.Repositories {
+
+		/**
+		 * Check if the repo matches the `--prefix` command line flag so
+		 * the user can sync only repos which match this prefix.
+		 */
+		if s.prefix != "" && !strings.HasPrefix(dockerRepo.Name, s.prefix) {
+			continue
+		}
+
+		wg.Add(1)
+		workerCh <- dockerRepo
+	}
+
+	// wait for all workers to complete
+	wg.Wait()
+	log.Info("Done")
+
+	fmt.Println(s.config)
 	fmt.Println("test")
 	return nil
+}
+
+func worker(wg *sync.WaitGroup, workerCh chan Repository, mc *client.Client) {
+	fmt.Println("Starting worker")
+
+	for {
+		select {
+		case repo := <-workerCh:
+
+			/**
+			 * Only support mirroring from thefollowing list.
+			 */
+			if repo.Host != "" && repo.Host != dockerHub && repo.Host != quay && repo.Host != gcr && repo.Host != k8s {
+				log.Errorf("Could not pull images from host: %s. We support %s, %s, %s, and %s", repo.Host, dockerHub, quay, gcr, k8s)
+				wg.Done()
+				continue
+			}
+
+			/**
+			 * If there is no host default to docker.
+			 */
+			if repo.Host == "" {
+				repo.Host = dockerHub
+			}
+
+			mirrorClient := Mirror {
+				mirrorClient: mc,
+			}
+
+			if err := mirrorClient.setup(repo); err != nil {
+				log.Errorf("Failed to setup mirror for repository %s: %s", repo.Name, err)
+				wg.Done()
+				continue
+			}
+
+			//mirrorClient.work()
+			mirrorClient.getRemoteTags()
+			wg.Done()
+		}
+		
+	}
+
+		wg.Done()
+
 }

@@ -34,8 +34,9 @@ var (
 	/* Path to the config file */
 	configFile string
 
-	/* Log prefix */
-	prefix       = "contianer-mirror: "
+	/* Only sync repos with prefix */
+	prefix string
+
 	logger       *log.Logger
 	logLevel     string
 )
@@ -60,13 +61,14 @@ func Execute() {
  * Create the service and start the mirror process.
  */
 func runCmd(cmd *cobra.Command, args []string) {
-		containerService := service.NewContainerService(configFile, true, true, logger)
+		containerService := service.NewContainerService(configFile, prefix, true, true, logger)
 		containerService.Get()
 }
 
 func init() {
 	logger = log.New()
 	rootCmd.Flags().StringVar(&configFile, "config", "config.yaml", "Set configuration file")
+	rootCmd.Flags().StringVar(&prefix, "prefix", "", "Only sync repos which match `prefix`")
 }
 
 
