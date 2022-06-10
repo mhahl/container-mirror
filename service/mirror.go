@@ -65,6 +65,7 @@ type RepositoryTag struct {
 
 
 type Mirror struct {
+	config       *ContainerConfig
 	mirrorClient *client.Client   // docker client used to pull, tag and push images
 	log          *log.Entry      // logrus logger with the relevant custom fields
 	repo         Repository      // repository the mirror
@@ -84,8 +85,22 @@ func (m *Mirror) setup(repo Repository) (err error) {
 		m.repo.MatchTags = []string{chunk[1]}
 	}
 
+	// fetch remote tags
+	m.remoteTags, err = m.getRemoteTags()
+	if err != nil {
+		return err
+	}
+
+	m.filterTags()
+
+	m.log = m.log.WithField("repo", m.repo.Name)
+	m.log = m.log.WithField("num_tags", len(m.remoteTags))
 	return nil
 
+}
+
+func (m *Mirror) filterTags() {
+	log.Info("filterting tags")
 }
 
 /**
@@ -137,11 +152,6 @@ func (m *Mirror) getRemoteTags() ([]RepositoryTag, error) {
 	}
 
 	var allTags []RepositoryTag
-
-	fmt.Println(url)
-	fmt.Println(allTags)
-	fmt.Println(token)
-
 
 search:
 	for {
@@ -234,7 +244,9 @@ search:
 		}
 	}
 
-	// sort the tags by updated/modified time if applicable, newest first
+	/**
+	 * Sort the tags by updated/modified time if applicable, newest first.
+	 */
 	switch m.repo.Host {
 	case dockerHub:
 		sort.Slice(allTags, func(i, j int) bool {
@@ -246,9 +258,63 @@ search:
 		})
 	}
 
-	fmt.Println(allTags)
 	return allTags, nil
 
+}
+
+func (m *Mirror) work() {
+	m.log.Debugf("Starting work")
+	for _, tag := range m.remoteTags {
+		m.log = m.log.WithField("tag", tag.Name)
+		m.log.Info("Start mirror tag")
+
+		if err := m.pullImage(tag.Name); err != nil {
+			m.log.Errorf("Failed to pull docker image: %s", err)
+			continue
+		}
+
+		if err := m.tagImage(tag.Name); err != nil {
+			m.log.Errorf("Failed to (re)tag docker image: %s", err)
+			continue
+		}
+
+		if err := m.pushImage(tag.Name); err != nil {
+			m.log.Errorf("Failed to push (re)tagged image: %s", err)
+			continue
+		}
+
+		if m.config.Cleanup == true {
+			if err := m.deleteImage(tag.Name); err != nil {
+				m.log.Errorf("Failed to clean image: %s", err)
+				continue
+			}
+		}
+
+		m.log.Info("Successfully pushed (re)tagged image")
+	}
+
+	m.log.WithField("tag", "")
+	m.log.Info("Repository mirror completed")
+}
+
+func (m *Mirror) pushImage(tag string) error {
+	log.Infof("Pushing %s", tag)
+	return nil
+}
+
+func (m *Mirror) tagImage(tag string) error {
+	log.Infof("Tag %s", tag)
+	return nil
+}
+
+func (m *Mirror) pullImage(tag string) error {
+	log.Infof("Pulling %s", tag)
+	return nil
+}
+
+func (m *Mirror) deleteImage(tag string) error {
+	log.Infof("Deleting %s", tag)
+	return nil
 }
 
 func getSleepTime(rateLimitReset string, now time.Time) time.Duration {

@@ -149,14 +149,12 @@ func NewContainerService(configFile string, prefix string, verbose bool, ignoreE
 
 func (s *ContainerService) Get() error {
 
-	fmt.Println("in Get()")
-
 	workerCh := make(chan Repository, 5)
 	var wg sync.WaitGroup
 
 	/* Start background workers */
 	for i := 0; i < s.config.Workers; i++ {
-		go worker(&wg, workerCh, s.dockerClient )
+		go worker(&wg, workerCh, s.dockerClient, s.config)
 	}
 
 	// add jobs for the workers
@@ -183,7 +181,7 @@ func (s *ContainerService) Get() error {
 	return nil
 }
 
-func worker(wg *sync.WaitGroup, workerCh chan Repository, mc *client.Client) {
+func worker(wg *sync.WaitGroup, workerCh chan Repository, mc *client.Client, config *ContainerConfig) {
 	fmt.Println("Starting worker")
 
 	for {
@@ -207,6 +205,7 @@ func worker(wg *sync.WaitGroup, workerCh chan Repository, mc *client.Client) {
 			}
 
 			mirrorClient := Mirror {
+				config: config,
 				mirrorClient: mc,
 			}
 
@@ -217,7 +216,7 @@ func worker(wg *sync.WaitGroup, workerCh chan Repository, mc *client.Client) {
 			}
 
 			//mirrorClient.work()
-			mirrorClient.getRemoteTags()
+			mirrorClient.work()
 			wg.Done()
 		}
 		
